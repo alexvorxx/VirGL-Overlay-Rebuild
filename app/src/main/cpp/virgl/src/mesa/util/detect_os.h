@@ -25,7 +25,7 @@
  * also be defined.
  */
 #if defined(ANDROID)
-#define DETECT_OS_ANDROID 1
+#define DETECT_OS_ANDROID 0
 #endif
 
 #if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
