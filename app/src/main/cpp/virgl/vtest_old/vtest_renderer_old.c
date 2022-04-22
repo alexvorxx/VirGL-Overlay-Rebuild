@@ -51,7 +51,7 @@
 #define FL_OVERLAY (1<<3)
 #define FL_MULTITHREAD (1<<4)
 
-extern struct vrend_context *overlay_ctx;
+extern struct vrend_context *overlay_ctx; //
 
 int dxtn_decompress; //DXTn (S3TC) decompress
 
@@ -631,7 +631,7 @@ static void vtest_dt_flush_old(struct vtest_renderer_old *r, struct dt_record_ol
     {
         struct vrend_resource *res;
 
-        res = vrend_renderer_ctx_res_lookup(overlay_ctx, handle);
+        res = vrend_renderer_ctx_res_lookup(overlay_ctx, handle); //
 
         glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, res->id, 0);
 

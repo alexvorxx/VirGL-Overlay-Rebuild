@@ -49,6 +49,8 @@ struct virgl_context;
 struct virgl_resource;
 struct vrend_context;
 
+struct vrend_context *overlay_ctx;
+
 /* Number of mipmap levels for which to keep the backing iov offsets.
  * Value mirrored from mesa/virgl
  */
@@ -550,3 +552,5 @@ void vrend_renderer_get_meminfo(struct vrend_context *ctx, uint32_t res_handle);
 
 void vrend_context_emit_string_marker(struct vrend_context *ctx, GLsizei length, const char * message);
 #endif
+
+struct vrend_resource *vrend_renderer_ctx_res_lookup(struct vrend_context *ctx, int res_handle);

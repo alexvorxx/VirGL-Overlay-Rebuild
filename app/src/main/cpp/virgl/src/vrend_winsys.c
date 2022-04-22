@@ -23,6 +23,7 @@
  **************************************************************************/
 
 #include "vrend_winsys.h"
+#include "vrend_debug.h"
 
 #ifdef HAVE_EPOXY_GLX_H
 #include "vrend_winsys_glx.h"
