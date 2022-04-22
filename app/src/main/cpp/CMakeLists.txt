@@ -77,6 +77,7 @@ add_library( # Sets the name of the library.
 
         virgl/src/gallium/auxiliary/util/u_debug_describe.c
         virgl/src/gallium/auxiliary/util/u_format.c
+        virgl/src/gallium/auxiliary/util/u_format_table.c
         virgl/src/gallium/auxiliary/util/u_hash_table.c
         virgl/src/gallium/auxiliary/util/u_texture.c
 
