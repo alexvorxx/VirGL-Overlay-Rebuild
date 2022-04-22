@@ -99,12 +99,16 @@ add_library( # Sets the name of the library.
         virgl/vtest_old/vtest_renderer_old.c
         virgl/vtest_old/vtest_server_old.c
 
+        virgl/gl4es/decompress.c
+
         )
 
 target_include_directories(
         virgl-lib
 
         PUBLIC epoxy/include
+
+        PUBLIC virgl/gl4es
 
         PRIVATE virgl/src
         PRIVATE virgl/src/gallium/auxiliary
@@ -120,6 +124,7 @@ target_include_directories(
         PRIVATE virgl/src/mesa/util
         PRIVATE virgl/vtest
         PRIVATE virgl/vtest_old
+        PRIVATE virgl/src/gl4es/
 )
 
 # Searches for a specified prebuilt library and stores the path as a
