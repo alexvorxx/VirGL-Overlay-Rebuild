@@ -1570,9 +1570,8 @@ static int vrend_decode_ctx_transfer_3d(struct virgl_context *ctx,
 {
    TRACE_FUNC();
    struct vrend_decode_ctx *dctx = (struct vrend_decode_ctx *)ctx;
-   int ret = vrend_renderer_transfer_iov(dctx->grctx, res->res_id, info,
-                                         transfer_mode);
-   return vrend_check_no_error(dctx->grctx) || ret ? ret : EINVAL;
+   return vrend_renderer_transfer_iov(dctx->grctx, res->res_id, info,
+                                      transfer_mode);
 }
 
 static int vrend_decode_ctx_get_blob(struct virgl_context *ctx,
@@ -1735,8 +1734,7 @@ static int vrend_decode_ctx_submit_cmd(struct virgl_context *ctx,
       TRACE_SCOPE_SLOW(vrend_get_comand_name(cmd));
 
       ret = decode_table[cmd](gdctx->grctx, buf, len);
-      if (!vrend_check_no_error(gdctx->grctx) && !ret)
-         ret = EINVAL;
+
       if (ret) {
          vrend_printf("context %d failed to dispatch %s: %d\n",
                gdctx->base.ctx_id, vrend_get_comand_name(cmd), ret);

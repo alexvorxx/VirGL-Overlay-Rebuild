@@ -6724,11 +6724,6 @@ int vrend_renderer_init(const struct vrend_if_cbs *cbs, uint32_t flags)
       vrend_state.use_egl_fence = virgl_egl_supports_fences(egl);
 #endif
 
-   if (!vrend_check_no_error(vrend_state.ctx0)) {
-      vrend_renderer_fini();
-      return EINVAL;
-   }
-
    return 0;
 }
 
