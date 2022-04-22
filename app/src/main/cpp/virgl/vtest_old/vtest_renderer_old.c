@@ -53,7 +53,7 @@
 
 extern struct vrend_context *overlay_ctx; //
 
-int dxtn_decompress; //DXTn (S3TC) decompress
+int dxtn_decompress; //DXTn (S3TC) decompress.
 
 static char sock_path_old[128];
 static int flags_old;
@@ -880,7 +880,7 @@ JNIEXPORT void JNICALL Java_com_mittorn_virgloverlay_common_overlay_nativeSettin
     if (utf) {
         FILE *f = fopen(utf, "r");
         if(!f)exit(1);
-        fscanf(f, "%d %d %d %d", &var1, &var2, &var3, &dxtn_decompress);
+        fscanf(f, "%d %d %d %d", &var1, &var2, &var3, &dxtn_decompress); //
         (*env)->ReleaseStringUTFChars(env, settings, utf);
     }
 }

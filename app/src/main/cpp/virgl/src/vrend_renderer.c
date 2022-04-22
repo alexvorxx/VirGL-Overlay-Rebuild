@@ -64,6 +64,27 @@
 #include <epoxy/glx.h>
 #endif
 
+#ifdef ANDROID_JNI
+#include <jni.h>
+#include <android/native_window.h>
+#include <android/native_window_jni.h>
+#include <android/log.h>
+#define printf(...) __android_log_print(ANDROID_LOG_DEBUG, "virgl", __VA_ARGS__)
+#endif
+
+static void CheckGlError( const char* pFunctionName )
+{
+    GLint error = glGetError();
+    if( error != GL_NO_ERROR )
+    {
+        printf("%s returned glError 0x%x\n", pFunctionName, error);
+    }
+}
+
+#include "decompress.h"
+
+extern int dxtn_decompress; //DXTn (S3TC) decompress.
+
 extern struct vrend_context *overlay_ctx;
 
 /*
@@ -7909,6 +7930,9 @@ static int vrend_renderer_transfer_write_iov(struct vrend_context *ctx,
 {
    void *data;
 
+   GLvoid *decompressed_data;
+   short decompress_success = 0;
+
    if ((is_only_bit(res->storage_bits, VREND_STORAGE_GUEST_MEMORY) ||
        has_bit(res->storage_bits, VREND_STORAGE_HOST_SYSTEM_MEMORY)) && res->iov) {
       return vrend_copy_iovec(iov, num_iovs, info->offset,
@@ -8104,10 +8128,67 @@ static int vrend_renderer_transfer_write_iov(struct vrend_context *ctx,
             else
                vrend_scale_depth(data, send_size, depth_scale);
          }
+
+          if (compressed && dxtn_decompress) {
+              // from gl4es code
+              int simpleAlpha = 0;
+              int complexAlpha = 0;
+              int transparent0 = (glformat == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT ||
+                                  glformat == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT) ? 1 : 0;
+
+              if(isDXTcAlpha(glformat))
+                  simpleAlpha = complexAlpha = 1;
+
+              if (data) {
+                  if ((info->box->width & 3) || (info->box->height & 3)) {
+                      GLvoid *tmp;
+                      GLsizei nw = info->box->width;
+                      GLsizei nh = info->box->height;
+                      int y_tmp;
+                      if (nw < 4) nw = 4;
+                      if (nh < 4) nh = 4;
+                      tmp = uncompressDXTc(nw, nh, glformat, comp_size, transparent0,
+                                           &simpleAlpha, &complexAlpha, data);
+                      decompressed_data = malloc(4 * info->box->width * info->box->height);
+
+                      for (y_tmp = 0; y_tmp < info->box->height; y_tmp ++)
+                          memcpy(decompressed_data + y_tmp * info->box->width * 4, tmp + y_tmp * nw * 4,
+                                 info->box->width * 4);
+                      free(tmp);
+                  } else {
+                      decompressed_data = uncompressDXTc(info->box->width, info->box->height, glformat,
+                                                         comp_size, transparent0, &simpleAlpha, &complexAlpha, data);
+                  }
+              }
+
+              if((gltype != GL_UNSIGNED_BYTE) && isDXTcSRGB(glformat)) {
+
+                  if(simpleAlpha && !complexAlpha) {
+                      glformat = GL_RGBA;
+                      gltype = GL_UNSIGNED_SHORT_5_5_5_1;
+                  } else if(complexAlpha || simpleAlpha) {
+                      glformat = GL_RGBA;
+                      gltype = GL_UNSIGNED_SHORT_4_4_4_4;
+                  } else {
+                      glformat = GL_RGB;
+                      gltype = GL_UNSIGNED_SHORT_5_6_5;
+                  }
+              } else {
+                  glformat = GL_RGBA;
+              }
+              decompress_success = 1;
+          }
+
          if (res->target == GL_TEXTURE_CUBE_MAP) {
             GLenum ctarget = GL_TEXTURE_CUBE_MAP_POSITIVE_X + info->box->z;
             if (compressed) {
-               glCompressedTexSubImage2D(ctarget, info->level, x, y,
+                if (dxtn_decompress) {
+                    glTexImage2D(ctarget, info->level, glformat, info->box->width,
+                                 info->box->height, 0, glformat, gltype, decompressed_data);
+                    CheckGlError("glTexImage2D");
+                }
+                else
+                    glCompressedTexSubImage2D(ctarget, info->level, x, y,
                                          info->box->width, info->box->height,
                                          glformat, comp_size, data);
             } else {
@@ -8116,7 +8197,14 @@ static int vrend_renderer_transfer_write_iov(struct vrend_context *ctx,
             }
          } else if (res->target == GL_TEXTURE_3D || res->target == GL_TEXTURE_2D_ARRAY || res->target == GL_TEXTURE_CUBE_MAP_ARRAY) {
             if (compressed) {
-               glCompressedTexSubImage3D(res->target, info->level, x, y, info->box->z,
+                if (dxtn_decompress) {
+                    glTexImage3D(res->target, info->level, glformat,
+                                 info->box->width, info->box->height, info->box->depth,
+                                 0, glformat, gltype, decompressed_data);
+                    CheckGlError("glTexImage3D");
+                }
+                else
+                    glCompressedTexSubImage3D(res->target, info->level, x, y, info->box->z,
                                          info->box->width, info->box->height, info->box->depth,
                                          glformat, comp_size, data);
             } else {
@@ -8125,7 +8213,12 @@ static int vrend_renderer_transfer_write_iov(struct vrend_context *ctx,
                                glformat, gltype, data);
             }
          } else if (res->target == GL_TEXTURE_1D) {
-            if (vrend_state.use_gles) {
+             if (compressed && dxtn_decompress) {
+                 glTexImage1D(res->target, info->level, glformat, info->box->width,
+                              0, glformat, gltype, decompressed_data);
+                 CheckGlError("glTexImage1D");
+             }
+             else if (vrend_state.use_gles) {
                /* Covers both compressed and none compressed. */
                report_gles_missing_func(ctx, "gl[Compressed]TexSubImage1D");
             } else if (compressed) {
@@ -8138,7 +8231,18 @@ static int vrend_renderer_transfer_write_iov(struct vrend_context *ctx,
             }
          } else {
             if (compressed) {
-               glCompressedTexSubImage2D(res->target, info->level, x, res->target == GL_TEXTURE_1D_ARRAY ? info->box->z : y,
+                if (dxtn_decompress) {
+                    glTexImage2D(res->target, info->level, glformat, info->box->width,
+                                 info->box->height, 0, glformat, gltype, NULL);
+                    CheckGlError("glTexImage2D");
+                    glTexSubImage2D(res->target, info->level, x, res->target == GL_TEXTURE_1D_ARRAY ? info->box->z : y,
+                                    info->box->width,
+                                    res->target == GL_TEXTURE_1D_ARRAY ? info->box->depth : info->box->height,
+                                    glformat, gltype, decompressed_data);
+                    CheckGlError("glTexSubImage2D");
+                }
+                else
+                    glCompressedTexSubImage2D(res->target, info->level, x, res->target == GL_TEXTURE_1D_ARRAY ? info->box->z : y,
                                          info->box->width, info->box->height,
                                          glformat, comp_size, data);
             } else {
@@ -8160,6 +8264,9 @@ static int vrend_renderer_transfer_write_iov(struct vrend_context *ctx,
       }
 
       glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+      if (decompress_success)
+         free(decompressed_data);
 
       if (need_temp)
          free(data);

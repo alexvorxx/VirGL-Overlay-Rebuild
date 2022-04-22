@@ -51,6 +51,9 @@
 #endif
 #endif
 
+#include "vtest_protocol_old.h"
+extern int dxtn_decompress; //DXTn (S3TC) decompress
+
 /* fill the format table */
 static struct vrend_format_table base_rgba_formats[] =
   {
@@ -432,7 +435,7 @@ static void vrend_add_formats(struct vrend_format_table *table, int num_entries)
        switch (desc->layout) {
        case UTIL_FORMAT_LAYOUT_S3TC:
           if (epoxy_has_gl_extension("GL_S3_s3tc") ||
-              epoxy_has_gl_extension("GL_EXT_texture_compression_s3tc"))
+              epoxy_has_gl_extension("GL_EXT_texture_compression_s3tc") || dxtn_decompress)
              vrend_insert_format(&table[i], VIRGL_BIND_SAMPLER_VIEW, flags);
           continue;
 

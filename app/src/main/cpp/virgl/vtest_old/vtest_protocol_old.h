@@ -109,4 +109,4 @@
 
 #endif
 
-int dxtn_decompress; //DXTn (S3TC) decompress
+int dxtn_decompress; //DXTn (S3TC) decompress.
