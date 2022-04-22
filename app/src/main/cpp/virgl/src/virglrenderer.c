@@ -36,8 +36,10 @@
 #include "pipe/p_state.h"
 #include "util/u_format.h"
 #include "util/u_math.h"
+#ifndef NO_VKR
 #include "vkr_allocator.h"
 #include "vkr_renderer.h"
+#endif
 #include "vrend_renderer.h"
 #include "proxy/proxy_renderer.h"
 #include "vrend_winsys.h"
@@ -171,10 +173,12 @@ void virgl_renderer_fill_caps(uint32_t set, uint32_t version,
       if (state.vrend_initialized)
          vrend_renderer_fill_caps(set, version, (union virgl_caps *)caps);
       break;
+#ifndef NO_VKR
    case VIRGL_RENDERER_CAPSET_VENUS:
       if (state.vkr_initialized)
          vkr_get_capset(caps);
       break;
+#endif
    default:
       break;
    }
@@ -222,6 +226,7 @@ int virgl_renderer_context_create_with_flags(uint32_t ctx_id,
          return EINVAL;
       ctx = vrend_renderer_context_create(ctx_id, nlen, name);
       break;
+#ifndef NO_VKR
    case VIRGL_RENDERER_CAPSET_VENUS:
       if (state.proxy_initialized)
          ctx = proxy_context_create(ctx_id, ctx_flags, nlen, name);
@@ -230,6 +235,7 @@ int virgl_renderer_context_create_with_flags(uint32_t ctx_id,
       else
          return EINVAL;
       break;
+#endif
    default:
       return EINVAL;
       break;
@@ -489,10 +495,12 @@ void virgl_renderer_get_cap_set(uint32_t cap_set, uint32_t *max_ver,
    case VIRGL_RENDERER_CAPSET_VIRGL2:
       vrend_renderer_get_cap_set(cap_set, max_ver, max_size);
       break;
+#ifndef NO_VKR
    case VIRGL_RENDERER_CAPSET_VENUS:
       *max_ver = 0;
       *max_size = vkr_get_capset(NULL);
       break;
+#endif
    default:
       *max_ver = 0;
       *max_size = 0;
@@ -605,13 +613,13 @@ void virgl_renderer_cleanup(UNUSED void *cookie)
 
    if (state.proxy_initialized)
       proxy_renderer_fini();
-
+#ifndef NO_VKR
    if (state.vkr_initialized) {
       vkr_renderer_fini();
       /* vkr_allocator_init is called on-demand upon the first map */
       vkr_allocator_fini();
    }
-
+#endif
    if (state.vrend_initialized)
       vrend_renderer_fini();
 
@@ -725,7 +733,7 @@ int virgl_renderer_init(void *cookie, int flags, struct virgl_renderer_callbacks
          goto fail;
       state.vrend_initialized = true;
    }
-
+#ifndef NO_VKR
    if (!state.vkr_initialized && (flags & VIRGL_RENDERER_VENUS)) {
       uint32_t vkr_flags = 0;
       if (flags & VIRGL_RENDERER_THREAD_SYNC)
@@ -740,7 +748,7 @@ int virgl_renderer_init(void *cookie, int flags, struct virgl_renderer_callbacks
          goto fail;
       state.vkr_initialized = true;
    }
-
+#endif
    if (!state.proxy_initialized && (flags & VIRGL_RENDERER_RENDER_SERVER)) {
       ret = proxy_renderer_init(&proxy_cbs, flags | VIRGL_RENDERER_NO_VIRGL);
       if (ret)
@@ -785,10 +793,10 @@ void virgl_renderer_reset(void)
 
    if (state.proxy_initialized)
       proxy_renderer_reset();
-
+#ifndef NO_VKR
    if (state.vkr_initialized)
       vkr_renderer_reset();
-
+#endif
    if (state.vrend_initialized)
       vrend_renderer_reset();
 }
@@ -993,9 +1001,11 @@ int virgl_renderer_resource_map(uint32_t res_handle, void **out_map, uint64_t *o
          map = mmap(NULL, res->map_size, PROT_WRITE | PROT_READ, MAP_SHARED, res->fd, 0);
          map_size = res->map_size;
          break;
+#ifndef NO_VKR
       case VIRGL_RESOURCE_FD_OPAQUE:
          ret = vkr_allocator_resource_map(res, &map, &map_size);
          break;
+#endif
       default:
          break;
       }
@@ -1025,9 +1035,11 @@ int virgl_renderer_resource_unmap(uint32_t res_handle)
       case VIRGL_RESOURCE_FD_DMABUF:
          ret = munmap(res->mapped, res->map_size);
          break;
+#ifndef NO_VKR
       case VIRGL_RESOURCE_FD_OPAQUE:
          ret = vkr_allocator_resource_unmap(res);
          break;
+#endif
       default:
          ret = -EINVAL;
          break;
