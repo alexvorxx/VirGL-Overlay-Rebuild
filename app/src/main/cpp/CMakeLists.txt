@@ -96,6 +96,9 @@ add_library( # Sets the name of the library.
         virgl/vtest/vtest_server.c
         virgl/vtest/vtest_shm.c
 
+        virgl/vtest_old/vtest_renderer_old.c
+        virgl/vtest_old/vtest_server_old.c
+
         )
 
 target_include_directories(
@@ -116,6 +119,7 @@ target_include_directories(
         PRIVATE virgl/src/mesa/pipe
         PRIVATE virgl/src/mesa/util
         PRIVATE virgl/vtest
+        PRIVATE virgl/vtest_old
 )
 
 # Searches for a specified prebuilt library and stores the path as a
