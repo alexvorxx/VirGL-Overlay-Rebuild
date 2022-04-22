@@ -109,9 +109,4 @@
 
 #endif
 
-int hack1; //VS hack
-int hack2; //Blend hack
-int hack11; //
-int hack12; //FS hack
-
 int dxtn_decompress; //DXTn (S3TC) decompress

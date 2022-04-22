@@ -24,8 +24,9 @@
 
 #ifndef VIRGL_GBM_H
 #define VIRGL_GBM_H
-
+#ifndef NO_GBM
 #include <gbm.h>
+#endif
 #include "vrend_iov.h"
 #include "virglrenderer.h"
 
