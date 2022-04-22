@@ -4,6 +4,7 @@ VirGL Overlay is used with Mesa to get GPU acceleration, typically in Exagear Wi
 
 Application based on Mittorn port of virglrenderer for Android:
 https://github.com/mittorn/virglrenderer
+
 https://github.com/mittorn/virglrenderer-android
 
 Also the following code was used in this repository:
