@@ -14,9 +14,9 @@
     <string name="information3">https://github.com/mittorn/virglrenderer</string>
     <string name="information4">Rebuild APK v.0.0.8 (mod debug) by alexvorxx</string>
     <string name="information5">The following code was used in this version:</string>
-    <string name="information6">virglrenderer-master (20.04.22)</string>
+    <string name="information6">virglrenderer-master (22.04.22)</string>
     <string name="information7">https://github.com/freedesktop/virglrenderer</string>
-    <string name="information8">libepoxy-1.5.9</string>
+    <string name="information8">libepoxy-1.5.10</string>
     <string name="information9">https://github.com/anholt/libepoxy</string>
     <string name="information10">gl4es-1.1.4</string>
     <string name="information11">https://github.com/ptitSeb/gl4es</string>

@@ -101,6 +101,8 @@ add_library( # Sets the name of the library.
 target_include_directories(
         virgl-lib
 
+        PUBLIC epoxy/include
+
         PRIVATE virgl/src
         PRIVATE virgl/src/gallium/auxiliary
         PRIVATE virgl/src/gallium/auxiliary/cso_cache
@@ -131,12 +133,17 @@ find_library( # Sets the name of the path variable.
               lgcc
             )
 
+add_subdirectory(
+        epoxy
+)
+
 # Specifies libraries CMake should link to your target library. You
 # can link multiple libraries, such as libraries you define in this
 # build script, prebuilt third-party libraries, or system libraries.
 
 target_link_libraries( # Specifies the target library.
                        virgl-lib
+                       epoxy-lib
                        -ljnigraphics
                        -landroid
                        -lgcc
