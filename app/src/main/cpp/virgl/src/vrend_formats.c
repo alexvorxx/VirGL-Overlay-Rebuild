@@ -52,6 +52,7 @@
 #endif
 
 #include "vtest_protocol_old.h"
+#include "vtest_protocol.h"
 extern int dxtn_decompress; //DXTn (S3TC) decompress
 
 /* fill the format table */

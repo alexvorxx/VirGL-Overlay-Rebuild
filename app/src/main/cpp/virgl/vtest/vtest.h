@@ -60,17 +60,17 @@ void vtest_set_current_context(struct vtest_context *ctx);
 //int vtest_send_caps(uint32_t length_dw);
 //int vtest_send_caps2(uint32_t length_dw);
 //int vtest_create_resource(uint32_t length_dw);
-int vtest_create_resource2(uint32_t length_dw);
+//int vtest_create_resource2(uint32_t length_dw);
 //int vtest_resource_unref(uint32_t length_dw);
 //int vtest_submit_cmd(uint32_t length_dw);
 
 //int vtest_transfer_get(uint32_t length_dw);
 int vtest_transfer_get_nop(uint32_t length_dw);
-int vtest_transfer_get2(uint32_t length_dw);
+//int vtest_transfer_get2(uint32_t length_dw);
 int vtest_transfer_get2_nop(uint32_t length_dw);
 //int vtest_transfer_put(uint32_t length_dw);
 int vtest_transfer_put_nop(uint32_t length_dw);
-int vtest_transfer_put2(uint32_t length_dw);
+//int vtest_transfer_put2(uint32_t length_dw);
 int vtest_transfer_put2_nop(uint32_t length_dw);
 
 int vtest_block_read(struct vtest_input *input, void *buf, int size);
@@ -80,8 +80,8 @@ int vtest_buf_read(struct vtest_input *input, void *buf, int size);
 int vtest_resource_busy_wait_nop(uint32_t length_dw);
 void vtest_poll_resource_busy_wait(void);
 
-int vtest_ping_protocol_version(uint32_t length_dw);
-int vtest_protocol_version(uint32_t length_dw);
+//int vtest_ping_protocol_version(uint32_t length_dw);
+//int vtest_protocol_version(uint32_t length_dw);
 
 /* since protocol version 3 */
 int vtest_get_param(uint32_t length_dw);

@@ -765,15 +765,15 @@ static struct vtest_context *vtest_get_current_context(void)
    return renderer.current_context;
 }
 
-int vtest_ping_protocol_version(UNUSED uint32_t length_dw)
+int vtest_ping_protocol_version(struct vtest_renderer *r, UNUSED uint32_t length_dw)
 {
-   struct vtest_context *ctx = vtest_get_current_context();
+   //struct vtest_context *ctx = vtest_get_current_context();
    uint32_t hdr_buf[VTEST_HDR_SIZE];
    int ret;
 
    hdr_buf[VTEST_CMD_LEN] = VCMD_PING_PROTOCOL_VERSION_SIZE;
    hdr_buf[VTEST_CMD_ID] = VCMD_PING_PROTOCOL_VERSION;
-   ret = vtest_block_write(ctx->out_fd, hdr_buf, sizeof(hdr_buf));
+   ret = vtest_block_write(r, hdr_buf, sizeof(hdr_buf));
    if (ret < 0) {
       return ret;
    }
@@ -781,15 +781,15 @@ int vtest_ping_protocol_version(UNUSED uint32_t length_dw)
    return 0;
 }
 
-int vtest_protocol_version(UNUSED uint32_t length_dw)
+int vtest_protocol_version(struct vtest_renderer *r, UNUSED uint32_t length_dw)
 {
-   struct vtest_context *ctx = vtest_get_current_context();
+   //struct vtest_context *ctx = vtest_get_current_context();
    uint32_t hdr_buf[VTEST_HDR_SIZE];
    uint32_t version_buf[VCMD_PROTOCOL_VERSION_SIZE];
    unsigned version;
    int ret;
 
-   ret = ctx->input->read(ctx->input, &version_buf, sizeof(version_buf));
+   ret = input->read(input, &version_buf, sizeof(version_buf));
    if (ret != sizeof(version_buf))
       return -1;
 
@@ -811,23 +811,28 @@ int vtest_protocol_version(UNUSED uint32_t length_dw)
       printf("Shared memory not supported, fallbacking to protocol version 0\n");
       version = 0;
    }
+   else {
+       printf("Shared memory supported \n");
+   }
 
-   if (renderer.multi_clients && version < 3)
-      return report_failed_call("protocol version too low", -EINVAL);
+   printf("Mesa protocol version %i \n", version);
 
-   ctx->protocol_version = version;
+   //if (renderer.multi_clients && version < 3)
+      //return report_failed_call("protocol version too low", -EINVAL);
+
+   //ctx->protocol_version = version;
 
    hdr_buf[VTEST_CMD_LEN] = VCMD_PROTOCOL_VERSION_SIZE;
    hdr_buf[VTEST_CMD_ID] = VCMD_PROTOCOL_VERSION;
 
-   version_buf[VCMD_PROTOCOL_VERSION_VERSION] = ctx->protocol_version;
+   version_buf[VCMD_PROTOCOL_VERSION_VERSION] = version;
 
-   ret = vtest_block_write(ctx->out_fd, hdr_buf, sizeof(hdr_buf));
+   ret = vtest_block_write(r, hdr_buf, sizeof(hdr_buf));
    if (ret < 0) {
       return ret;
    }
 
-   ret = vtest_block_write(ctx->out_fd, version_buf, sizeof(version_buf));
+   ret = vtest_block_write(r, version_buf, sizeof(version_buf));
    if (ret < 0) {
       return ret;
    }
@@ -1191,19 +1196,19 @@ int vtest_create_resource(struct vtest_renderer *r, UNUSED uint32_t length_dw)
    return vtest_create_resource_internal(r, VCMD_RESOURCE_CREATE, &args, 0);
 }
 
-int vtest_create_resource2(UNUSED uint32_t length_dw)
+int vtest_create_resource2(struct vtest_renderer *r, UNUSED uint32_t length_dw)
 {
-   struct vtest_context *ctx = vtest_get_current_context();
+   //struct vtest_context *ctx = vtest_get_current_context();
    struct virgl_renderer_resource_create_args args;
    size_t shm_size;
    int ret;
 
-   ret = vtest_create_resource_decode_args2(ctx, &args, &shm_size);
+   ret = vtest_create_resource_decode_args2(r, &args, &shm_size);
    if (ret < 0) {
       return ret;
    }
 
-   return vtest_create_resource_internal(ctx, VCMD_RESOURCE_CREATE2, &args, shm_size);
+   return vtest_create_resource_internal(r, VCMD_RESOURCE_CREATE2, &args, shm_size);
 }
 
 int vtest_resource_create_blob(UNUSED uint32_t length_dw)
@@ -1398,13 +1403,13 @@ static int vtest_transfer_decode_args(struct vtest_renderer *r,
    return 0;
 }
 
-static int vtest_transfer_decode_args2(struct vtest_context *ctx,
+static int vtest_transfer_decode_args2(struct vtest_renderer *r,
                                        struct vtest_transfer_args *args)
 {
    uint32_t thdr_buf[VCMD_TRANSFER2_HDR_SIZE];
    int ret;
 
-   ret = ctx->input->read(ctx->input, thdr_buf, sizeof(thdr_buf));
+   ret = input->read(input, thdr_buf, sizeof(thdr_buf));
    if (ret != sizeof(thdr_buf)) {
       return -1;
    }
@@ -1589,18 +1594,18 @@ int vtest_transfer_put_nop(UNUSED uint32_t length_dw)
    return vtest_transfer_put_internal(ctx, &args, data_size, false);
 }
 
-int vtest_transfer_get2(UNUSED uint32_t length_dw)
+int vtest_transfer_get2(struct vtest_renderer *r, UNUSED uint32_t length_dw)
 {
-   struct vtest_context *ctx = vtest_get_current_context();
+   //struct vtest_context *ctx = vtest_get_current_context();
    int ret;
    struct vtest_transfer_args args;
 
-   ret = vtest_transfer_decode_args2(ctx, &args);
+   ret = vtest_transfer_decode_args2(r, &args);
    if (ret < 0) {
       return ret;
    }
 
-   return vtest_transfer_get_internal(ctx, &args, 0, true);
+   return vtest_transfer_get_internal(r, &args, 0, true);
 }
 
 int vtest_transfer_get2_nop(UNUSED uint32_t length_dw)
@@ -1617,18 +1622,18 @@ int vtest_transfer_get2_nop(UNUSED uint32_t length_dw)
    return vtest_transfer_get_internal(ctx, &args, 0, false);
 }
 
-int vtest_transfer_put2(UNUSED uint32_t length_dw)
+int vtest_transfer_put2(struct vtest_renderer *r, UNUSED uint32_t length_dw)
 {
-   struct vtest_context *ctx = vtest_get_current_context();
+   //struct vtest_context *ctx = vtest_get_current_context();
    int ret;
    struct vtest_transfer_args args;
 
-   ret = vtest_transfer_decode_args2(ctx, &args);
+   ret = vtest_transfer_decode_args2(r, &args);
    if (ret < 0) {
       return ret;
    }
 
-   return vtest_transfer_put_internal(ctx, &args, 0, true);
+   return vtest_transfer_put_internal(r, &args, 0, true);
 }
 
 int vtest_transfer_put2_nop(UNUSED uint32_t length_dw)
@@ -1681,7 +1686,7 @@ int vtest_resource_busy_wait(struct vtest_renderer *r, UNUSED uint32_t length_dw
       /* TODO this is bad when there are multiple clients */
       fd = virgl_renderer_get_poll_fd();
       if (fd != -1) {
-         vtest_wait_for_fd_read(r->fd);
+         vtest_wait_for_fd_read(fd);
       }
       virgl_renderer_poll();
    } while (true);
@@ -2427,7 +2432,7 @@ static int vtest_dt_cmd(struct vtest_renderer *r)
    uint32_t cmd, x, y, w, h, handle;
    uint32_t drawable, id;
 
-   ret = vtest_block_read(r, &flush_buf, sizeof(flush_buf));
+   ret = input->read(input, &flush_buf, sizeof(flush_buf));
    if (ret != sizeof(flush_buf))
       return -1;
 
@@ -2494,7 +2499,7 @@ static int vtest_create_renderer(struct vtest_renderer *r, uint32_t length)
    if (!vtestname)
       return -1;
 
-   ret = vtest_block_read(r, vtestname, length);
+   ret = input->read(input, vtestname, length);
    if (ret != (int)length) {
       ret = -1;
       goto end;
@@ -2593,6 +2598,23 @@ again:
               break;
          case VCMD_DT_COMMAND:
             ret = vtest_dt_cmd(r);
+              break;
+
+         // Protocol version 2:
+         case VCMD_PROTOCOL_VERSION:
+            ret = vtest_protocol_version(r, header[0]);
+              break;
+         case VCMD_PING_PROTOCOL_VERSION:
+            ret = vtest_ping_protocol_version(r, header[0]);
+              break;
+         case VCMD_RESOURCE_CREATE2:
+            ret = vtest_create_resource2(r, header[0]);
+              break;
+         case VCMD_TRANSFER_GET2:
+            ret = vtest_transfer_get2(r, header[0]);
+              break;
+         case VCMD_TRANSFER_PUT2:
+            ret = vtest_transfer_put2(r, header[0]);
               break;
          default:
             break;

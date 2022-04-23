@@ -28,7 +28,7 @@
 #define VTEST_DEFAULT_SOCKET_NAME "/tmp/.virgl_test"
 
 #ifdef VIRGL_RENDERER_UNSTABLE_APIS
-#define VTEST_PROTOCOL_VERSION 3
+#define VTEST_PROTOCOL_VERSION 2
 #else
 #define VTEST_PROTOCOL_VERSION 2
 #endif
@@ -264,3 +264,5 @@ struct vcmd_submit_cmd2_batch {
 #define VCMD_DT_CMD_FLUSH 3
 
 #endif /* VTEST_PROTOCOL */
+
+int dxtn_decompress; //DXTn (S3TC) decompress.
