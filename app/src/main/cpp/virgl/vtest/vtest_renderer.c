@@ -200,6 +200,7 @@ struct vtest_renderer {
        jmethodID destroy;
    } jni;
 #endif
+   struct util_hash_table *resource_table;
 
    int implicit_fence_submitted;
    int implicit_fence_completed;
@@ -216,6 +217,9 @@ struct vtest_renderer {
 
    struct vtest_context *current_context;
 };
+
+struct vtest_input *input;
+struct vtest_renderer *r0;
 
 /*
  * VCMD_RESOURCE_BUSY_WAIT is used to wait GPU works (VCMD_SUBMIT_CMD) or CPU
@@ -272,19 +276,19 @@ static struct vtest_renderer renderer = {
    .next_sync_id = 1,
 };
 
-static struct vtest_resource *vtest_new_resource(uint32_t client_res_id)
+static struct vtest_resource *vtest_new_resource(struct vtest_renderer *r, uint32_t client_res_id)
 {
    struct vtest_resource *res;
 
-   if (LIST_IS_EMPTY(&renderer.free_resources)) {
+   if (LIST_IS_EMPTY(&r->free_resources)) {
       res = malloc(sizeof(*res));
       if (!res) {
          return NULL;
       }
 
-      res->server_res_id = renderer.next_resource_id++;
+      res->server_res_id = r->next_resource_id++;
    } else {
-      res = LIST_ENTRY(struct vtest_resource, renderer.free_resources.next, head);
+      res = LIST_ENTRY(struct vtest_resource, r->free_resources.next, head);
       list_del(&res->head);
    }
 
@@ -305,7 +309,7 @@ static void vtest_unref_resource(struct vtest_resource *res)
    if (res->iov.iov_base)
       munmap(res->iov.iov_base, res->iov.iov_len);
 
-   list_add(&res->head, &renderer.free_resources);
+   list_add(&res->head, &r0->free_resources);
 }
 
 static struct vtest_sync *vtest_new_sync(uint64_t value)
@@ -399,7 +403,7 @@ sync_destroy_func(void *value)
    vtest_unref_sync(sync);
 }
 
-static int vtest_block_write(int fd, void *buf, int size)
+static int vtest_block_write(struct vtest_renderer *r, void *buf, int size)
 {
    char *ptr = buf;
    int left;
@@ -407,7 +411,7 @@ static int vtest_block_write(int fd, void *buf, int size)
    left = size;
 
    do {
-      ret = write(fd, ptr, left);
+      ret = write(r->fd, ptr, left);
       if (ret < 0) {
          return -errno;
       }
@@ -419,9 +423,9 @@ static int vtest_block_write(int fd, void *buf, int size)
    return size;
 }
 
-int vtest_block_read(struct vtest_input *input, void *buf, int size)
+int vtest_block_read(struct vtest_input *input0, void *buf, int size)
 {
-   int fd = input->data.fd;
+   int fd = input0->data.fd;
    char *ptr = buf;
    int left;
    int ret;
@@ -948,9 +952,9 @@ int vtest_context_init(UNUSED uint32_t length_dw)
    return vtest_lazy_init_context(ctx);
 }
 
-int vtest_send_caps2(UNUSED uint32_t length_dw)
+int vtest_send_caps2(struct vtest_renderer *r, UNUSED uint32_t length_dw)
 {
-   struct vtest_context *ctx = vtest_get_current_context();
+   //struct vtest_context *ctx = vtest_get_current_context();
    uint32_t hdr_buf[2];
    void *caps_buf;
    int ret;
@@ -971,12 +975,12 @@ int vtest_send_caps2(UNUSED uint32_t length_dw)
 
    hdr_buf[0] = max_size + 1;
    hdr_buf[1] = 2;
-   ret = vtest_block_write(ctx->out_fd, hdr_buf, 8);
+   ret = vtest_block_write(r, hdr_buf, 8);
    if (ret < 0) {
       goto end;
    }
 
-   vtest_block_write(ctx->out_fd, caps_buf, max_size);
+   vtest_block_write(r, caps_buf, max_size);
    if (ret < 0) {
       goto end;
    }
@@ -986,9 +990,9 @@ end:
    return 0;
 }
 
-int vtest_send_caps(UNUSED uint32_t length_dw)
+int vtest_send_caps(struct vtest_renderer *r, UNUSED uint32_t length_dw)
 {
-   struct vtest_context *ctx = vtest_get_current_context();
+   //struct vtest_context *ctx = vtest_get_current_context();
    uint32_t  max_ver, max_size;
    void *caps_buf;
    uint32_t hdr_buf[2];
@@ -1005,12 +1009,12 @@ int vtest_send_caps(UNUSED uint32_t length_dw)
 
    hdr_buf[0] = max_size + 1;
    hdr_buf[1] = 1;
-   ret = vtest_block_write(ctx->out_fd, hdr_buf, 8);
+   ret = vtest_block_write(r, hdr_buf, 8);
    if (ret < 0) {
       goto end;
    }
 
-   vtest_block_write(ctx->out_fd, caps_buf, max_size);
+   vtest_block_write(r, caps_buf, max_size);
    if (ret < 0) {
       goto end;
    }
@@ -1020,13 +1024,13 @@ end:
    return 0;
 }
 
-static int vtest_create_resource_decode_args(struct vtest_context *ctx,
+static int vtest_create_resource_decode_args(struct vtest_renderer *r,
                                              struct virgl_renderer_resource_create_args *args)
 {
    uint32_t res_create_buf[VCMD_RES_CREATE_SIZE];
    int ret;
 
-   ret = ctx->input->read(ctx->input, &res_create_buf,
+   ret = input->read(input, &res_create_buf,
                           sizeof(res_create_buf));
    if (ret != sizeof(res_create_buf)) {
       return -1;
@@ -1048,14 +1052,14 @@ static int vtest_create_resource_decode_args(struct vtest_context *ctx,
    return 0;
 }
 
-static int vtest_create_resource_decode_args2(struct vtest_context *ctx,
+static int vtest_create_resource_decode_args2(struct vtest_renderer *r,
                                               struct virgl_renderer_resource_create_args *args,
                                               size_t *shm_size)
 {
    uint32_t res_create_buf[VCMD_RES_CREATE2_SIZE];
    int ret;
 
-   ret = ctx->input->read(ctx->input, &res_create_buf,
+   ret = input->read(input, &res_create_buf,
                           sizeof(res_create_buf));
    if (ret != sizeof(res_create_buf)) {
       return -1;
@@ -1101,7 +1105,7 @@ static int vtest_create_resource_setup_shm(struct vtest_resource *res,
    return fd;
 }
 
-static int vtest_create_resource_internal(struct vtest_context *ctx,
+static int vtest_create_resource_internal(struct vtest_renderer *r,
                                           uint32_t cmd_id,
                                           struct virgl_renderer_resource_create_args *args,
                                           size_t shm_size)
@@ -1109,17 +1113,17 @@ static int vtest_create_resource_internal(struct vtest_context *ctx,
    struct vtest_resource *res;
    int ret;
 
-   if (ctx->protocol_version >= 3) {
+   /*if (ctx->protocol_version >= 3) {
       if (args->handle)
          return -EINVAL;
-   } else {
+   } else {*/
       // Check that the handle doesn't already exist.
-      if (util_hash_table_get(ctx->resource_table, intptr_to_pointer(args->handle))) {
+      if (util_hash_table_get(r->resource_table, intptr_to_pointer(args->handle))) {
          return -EEXIST;
       }
-   }
+   //}
 
-   res = vtest_new_resource(args->handle);
+   res = vtest_new_resource(r, args->handle);
    if (!res)
       return -ENOMEM;
    args->handle = res->res_id;
@@ -1130,9 +1134,9 @@ static int vtest_create_resource_internal(struct vtest_context *ctx,
       return report_failed_call("virgl_renderer_resource_create", ret);
    }
 
-   virgl_renderer_ctx_attach_resource(ctx->ctx_id, res->res_id);
+   virgl_renderer_ctx_attach_resource(r->ctx_id, res->res_id);
 
-   if (ctx->protocol_version >= 3) {
+   /*if (ctx->protocol_version >= 3) {
       uint32_t resp_buf[VTEST_HDR_SIZE + 1] = {
          [VTEST_CMD_LEN] = 1,
          [VTEST_CMD_ID] = cmd_id,
@@ -1143,7 +1147,7 @@ static int vtest_create_resource_internal(struct vtest_context *ctx,
          vtest_unref_resource(res);
          return ret;
       }
-   }
+   }*/
 
    /* no shm for v1 resources or v2 multi-sample resources */
    if (shm_size) {
@@ -1155,7 +1159,7 @@ static int vtest_create_resource_internal(struct vtest_context *ctx,
          return -ENOMEM;
       }
 
-      ret = vtest_send_fd(ctx->out_fd, fd);
+      ret = vtest_send_fd(r->fd, fd);
       if (ret < 0) {
          close(fd);
          vtest_unref_resource(res);
@@ -1168,23 +1172,23 @@ static int vtest_create_resource_internal(struct vtest_context *ctx,
       virgl_renderer_resource_attach_iov(res->res_id, &res->iov, 1);
    }
 
-   util_hash_table_set(ctx->resource_table, intptr_to_pointer(res->res_id), res);
+   util_hash_table_set(r->resource_table, intptr_to_pointer(res->res_id), res);
 
    return 0;
 }
 
-int vtest_create_resource(UNUSED uint32_t length_dw)
+int vtest_create_resource(struct vtest_renderer *r, UNUSED uint32_t length_dw)
 {
-   struct vtest_context *ctx = vtest_get_current_context();
+   //struct vtest_context *ctx = vtest_get_current_context();
    struct virgl_renderer_resource_create_args args;
    int ret;
 
-   ret = vtest_create_resource_decode_args(ctx, &args);
+   ret = vtest_create_resource_decode_args(r, &args);
    if (ret < 0) {
       return ret;
    }
 
-   return vtest_create_resource_internal(ctx, VCMD_RESOURCE_CREATE, &args, 0);
+   return vtest_create_resource_internal(r, VCMD_RESOURCE_CREATE, &args, 0);
 }
 
 int vtest_create_resource2(UNUSED uint32_t length_dw)
@@ -1225,7 +1229,7 @@ int vtest_resource_create_blob(UNUSED uint32_t length_dw)
    args.blob_id = res_create_blob_buf[VCMD_RES_CREATE_BLOB_ID_LO];
    args.blob_id |= (uint64_t)res_create_blob_buf[VCMD_RES_CREATE_BLOB_ID_HI] << 32;
 
-   res = vtest_new_resource(0);
+   res = vtest_new_resource(NULL, 0);
    if (!res)
       return -ENOMEM;
 
@@ -1302,32 +1306,32 @@ int vtest_resource_create_blob(UNUSED uint32_t length_dw)
    return 0;
 }
 
-int vtest_resource_unref(UNUSED uint32_t length_dw)
+int vtest_resource_unref(struct vtest_renderer *r, UNUSED uint32_t length_dw)
 {
-   struct vtest_context *ctx = vtest_get_current_context();
+   //struct vtest_context *ctx = vtest_get_current_context();
    uint32_t res_unref_buf[VCMD_RES_UNREF_SIZE];
    int ret;
    uint32_t handle;
 
-   ret = ctx->input->read(ctx->input, &res_unref_buf,
+   ret = input->read(input, &res_unref_buf,
                           sizeof(res_unref_buf));
    if (ret != sizeof(res_unref_buf)) {
       return -1;
    }
 
    handle = res_unref_buf[VCMD_RES_UNREF_RES_HANDLE];
-   util_hash_table_remove(ctx->resource_table, intptr_to_pointer(handle));
+   util_hash_table_remove(r->resource_table, intptr_to_pointer(handle));
 
    return 0;
 }
 
-int vtest_submit_cmd(uint32_t length_dw)
+int vtest_submit_cmd(struct vtest_renderer *r, uint32_t length_dw)
 {
-   struct vtest_context *ctx = vtest_get_current_context();
+   //struct vtest_context *ctx = vtest_get_current_context();
    uint32_t *cbuf;
    int ret;
 
-   if (length_dw > renderer.max_length / 4) {
+   if (length_dw > r->max_length / 4) {
       return -1;
    }
 
@@ -1336,19 +1340,19 @@ int vtest_submit_cmd(uint32_t length_dw)
       return -1;
    }
 
-   ret = ctx->input->read(ctx->input, cbuf, length_dw * 4);
+   ret = input->read(input, cbuf, length_dw * 4);
    if (ret != (int)length_dw * 4) {
       free(cbuf);
       return -1;
    }
 
-   ret = virgl_renderer_submit_cmd(cbuf, ctx->ctx_id, length_dw);
+   ret = virgl_renderer_submit_cmd(cbuf, r->ctx_id, length_dw);
 
    free(cbuf);
    if (ret)
       return -1;
 
-   vtest_create_implicit_fence(&renderer);
+   vtest_create_implicit_fence(r);
    return 0;
 }
 
@@ -1361,14 +1365,14 @@ struct vtest_transfer_args {
    uint32_t offset;
 };
 
-static int vtest_transfer_decode_args(struct vtest_context *ctx,
+static int vtest_transfer_decode_args(struct vtest_renderer *r,
                                       struct vtest_transfer_args *args,
                                       uint32_t *data_size)
 {
    uint32_t thdr_buf[VCMD_TRANSFER_HDR_SIZE];
    int ret;
 
-   ret = ctx->input->read(ctx->input, thdr_buf, sizeof(thdr_buf));
+   ret = input->read(input, thdr_buf, sizeof(thdr_buf));
    if (ret != sizeof(thdr_buf)) {
       return -1;
    }
@@ -1387,7 +1391,7 @@ static int vtest_transfer_decode_args(struct vtest_context *ctx,
 
    *data_size = thdr_buf[VCMD_TRANSFER_DATA_SIZE];
 
-   if (*data_size > renderer.max_length) {
+   if (*data_size > r->max_length) {
       return -ENOMEM;
    }
 
@@ -1420,7 +1424,7 @@ static int vtest_transfer_decode_args2(struct vtest_context *ctx,
    return 0;
 }
 
-static int vtest_transfer_get_internal(struct vtest_context *ctx,
+static int vtest_transfer_get_internal(struct vtest_renderer *r,
                                        struct vtest_transfer_args *args,
                                        uint32_t data_size,
                                        bool do_transfer)
@@ -1429,7 +1433,7 @@ static int vtest_transfer_get_internal(struct vtest_context *ctx,
    struct iovec data_iov;
    int ret = 0;
 
-   res = util_hash_table_get(ctx->resource_table,
+   res = util_hash_table_get(r->resource_table,
                              intptr_to_pointer(args->handle));
    if (!res) {
       return report_failed_call("util_hash_table_get", -ESRCH);
@@ -1449,7 +1453,7 @@ static int vtest_transfer_get_internal(struct vtest_context *ctx,
 
    if (do_transfer) {
       ret = virgl_renderer_transfer_read_iov(res->res_id,
-                                             ctx->ctx_id,
+                                             r->ctx_id,
                                              args->level,
                                              args->stride,
                                              args->layer_stride,
@@ -1465,7 +1469,7 @@ static int vtest_transfer_get_internal(struct vtest_context *ctx,
    }
 
    if (data_size) {
-      ret = vtest_block_write(ctx->out_fd, data_iov.iov_base, data_iov.iov_len);
+      ret = vtest_block_write(r, data_iov.iov_base, data_iov.iov_len);
       if (ret > 0)
          ret = 0;
 
@@ -1475,7 +1479,7 @@ static int vtest_transfer_get_internal(struct vtest_context *ctx,
    return ret;
 }
 
-static int vtest_transfer_put_internal(struct vtest_context *ctx,
+static int vtest_transfer_put_internal(struct vtest_renderer *r,
                                        struct vtest_transfer_args *args,
                                        uint32_t data_size,
                                        bool do_transfer)
@@ -1484,7 +1488,7 @@ static int vtest_transfer_put_internal(struct vtest_context *ctx,
    struct iovec data_iov;
    int ret = 0;
 
-   res = util_hash_table_get(ctx->resource_table,
+   res = util_hash_table_get(r->resource_table,
                              intptr_to_pointer(args->handle));
    if (!res) {
       return report_failed_call("util_hash_table_get", -ESRCH);
@@ -1497,7 +1501,7 @@ static int vtest_transfer_put_internal(struct vtest_context *ctx,
          return -ENOMEM;
       }
 
-      ret = ctx->input->read(ctx->input, data_iov.iov_base, data_iov.iov_len);
+      ret = input->read(input, data_iov.iov_base, data_iov.iov_len);
       if (ret < 0) {
          return ret;
       }
@@ -1505,7 +1509,7 @@ static int vtest_transfer_put_internal(struct vtest_context *ctx,
 
    if (do_transfer) {
       ret = virgl_renderer_transfer_write_iov(res->res_id,
-                                              ctx->ctx_id,
+                                              r->ctx_id,
                                               args->level,
                                               args->stride,
                                               args->layer_stride,
@@ -1525,19 +1529,19 @@ static int vtest_transfer_put_internal(struct vtest_context *ctx,
    return ret;
 }
 
-int vtest_transfer_get(UNUSED uint32_t length_dw)
+int vtest_transfer_get(struct vtest_renderer *r, UNUSED uint32_t length_dw)
 {
-   struct vtest_context *ctx = vtest_get_current_context();
+   //struct vtest_context *ctx = vtest_get_current_context();
    int ret;
    struct vtest_transfer_args args;
    uint32_t data_size;
 
-   ret = vtest_transfer_decode_args(ctx, &args, &data_size);
+   ret = vtest_transfer_decode_args(r, &args, &data_size);
    if (ret < 0) {
       return ret;
    }
 
-   return vtest_transfer_get_internal(ctx, &args, data_size, true);
+   return vtest_transfer_get_internal(r, &args, data_size, true);
 }
 
 int vtest_transfer_get_nop(UNUSED uint32_t length_dw)
@@ -1555,19 +1559,19 @@ int vtest_transfer_get_nop(UNUSED uint32_t length_dw)
    return vtest_transfer_get_internal(ctx, &args, data_size, false);
 }
 
-int vtest_transfer_put(UNUSED uint32_t length_dw)
+int vtest_transfer_put(struct vtest_renderer *r, UNUSED uint32_t length_dw)
 {
-   struct vtest_context *ctx = vtest_get_current_context();
+   //struct vtest_context *ctx = vtest_get_current_context();
    int ret;
    struct vtest_transfer_args args;
    uint32_t data_size;
 
-   ret = vtest_transfer_decode_args(ctx, &args, &data_size);
+   ret = vtest_transfer_decode_args(r, &args, &data_size);
    if (ret < 0) {
       return ret;
    }
 
-   return vtest_transfer_put_internal(ctx, &args, data_size, true);
+   return vtest_transfer_put_internal(r, &args, data_size, true);
 }
 
 int vtest_transfer_put_nop(UNUSED uint32_t length_dw)
@@ -1641,17 +1645,17 @@ int vtest_transfer_put2_nop(UNUSED uint32_t length_dw)
    return vtest_transfer_put_internal(ctx, &args, 0, false);
 }
 
-int vtest_resource_busy_wait(UNUSED uint32_t length_dw)
+int vtest_resource_busy_wait(struct vtest_renderer *r, UNUSED uint32_t length_dw)
 {
-   struct vtest_context *ctx = vtest_get_current_context();
+   //struct vtest_context *ctx = vtest_get_current_context();
    uint32_t bw_buf[VCMD_BUSY_WAIT_SIZE];
    int ret, fd;
-   int flags;
+   int flags0;
    uint32_t hdr_buf[VTEST_HDR_SIZE];
    uint32_t reply_buf[1];
    bool busy = false;
 
-   ret = ctx->input->read(ctx->input, &bw_buf, sizeof(bw_buf));
+   ret = input->read(input, &bw_buf, sizeof(bw_buf));
    if (ret != sizeof(bw_buf)) {
       return -1;
    }
@@ -1661,22 +1665,23 @@ int vtest_resource_busy_wait(UNUSED uint32_t length_dw)
     * VCMD_PING_PROTOCOL_VERSION is supported.  We need to make a special case
     * for that.
     */
-   if (!ctx->context_initialized && bw_buf[VCMD_BUSY_WAIT_HANDLE])
-      return -1;
+
+   //if (!ctx->context_initialized && bw_buf[VCMD_BUSY_WAIT_HANDLE])
+      //return -1;
 
    /*  handle = bw_buf[VCMD_BUSY_WAIT_HANDLE]; unused as of now */
-   flags = bw_buf[VCMD_BUSY_WAIT_FLAGS];
+   flags0 = bw_buf[VCMD_BUSY_WAIT_FLAGS];
 
    do {
-      busy = renderer.implicit_fence_completed !=
-             renderer.implicit_fence_submitted;
-      if (!busy || !(flags & VCMD_BUSY_WAIT_FLAG_WAIT))
+      busy = r->implicit_fence_completed !=
+             r->implicit_fence_submitted;
+      if (!busy || !(flags0 & VCMD_BUSY_WAIT_FLAG_WAIT))
          break;
 
       /* TODO this is bad when there are multiple clients */
       fd = virgl_renderer_get_poll_fd();
       if (fd != -1) {
-         vtest_wait_for_fd_read(fd);
+         vtest_wait_for_fd_read(r->fd);
       }
       virgl_renderer_poll();
    } while (true);
@@ -1685,12 +1690,12 @@ int vtest_resource_busy_wait(UNUSED uint32_t length_dw)
    hdr_buf[VTEST_CMD_ID] = VCMD_RESOURCE_BUSY_WAIT;
    reply_buf[0] = busy ? 1 : 0;
 
-   ret = vtest_block_write(ctx->out_fd, hdr_buf, sizeof(hdr_buf));
+   ret = vtest_block_write(r, hdr_buf, sizeof(hdr_buf));
    if (ret < 0) {
       return ret;
    }
 
-   ret = vtest_block_write(ctx->out_fd, reply_buf, sizeof(reply_buf));
+   ret = vtest_block_write(r, reply_buf, sizeof(reply_buf));
    if (ret < 0) {
       return ret;
    }
@@ -2337,8 +2342,8 @@ static int vtest_egl_make_context_current(void *cookie, int scanout_idx, virgl_r
 }
 
 struct virgl_renderer_callbacks vtest_cbs = {
-        .version = 1,
-        .write_fence = vtest_write_fence,
+        .version = VIRGL_RENDERER_CALLBACKS_VERSION,
+        .write_fence = vtest_write_implicit_fence,
         .create_gl_context = vtest_egl_create_context,
         .destroy_gl_context = vtest_egl_destroy_context,
         .make_current = vtest_egl_make_context_current,
@@ -2518,8 +2523,19 @@ void *create_renderer(int in_fd, int ctx_id)
    struct vtest_renderer *r = calloc(1, sizeof(struct vtest_renderer));
 
    r->ctx_id = ctx_id;
-   r->fence_id = 1;
    r->fd = in_fd;
+
+   r->max_length = UINT_MAX;
+   r->next_resource_id = 1;
+   list_inithead(&r->free_resources);
+   r->resource_table = util_hash_table_create(u32_hash_func,
+                                              u32_compare_func,
+                                              resource_destroy_func);
+
+   input = calloc(1, sizeof(struct vtest_input));
+
+   input->data.fd = in_fd;
+   input->read = vtest_block_read;
 
    return r;
 }
@@ -2533,12 +2549,12 @@ int renderer_loop(void *d)
    EGLContext ctx = 0;
    EGLSurface surf = 0;
 
-    again:
-   ret = vtest_wait_for_fd_read(r);
+again:
+   ret = vtest_wait_for_fd_read(r->fd);
    if (ret < 0)
       goto fail;
 
-   ret = vtest_block_read(r, &header, sizeof(header));
+   ret = input->read(input, &header, sizeof(header));
 
    if (ret == 8) {
       if (!inited) {
@@ -2547,16 +2563,18 @@ int renderer_loop(void *d)
          ret = vtest_create_renderer(r, header[0]);
          inited = true;
       }
-      vtest_poll();
+      vtest_poll_resource_busy_wait();
+
       switch (header[1]) {
+         // Protocol version 1:
          case VCMD_GET_CAPS:
-            ret = vtest_send_caps(r);
+            ret = vtest_send_caps(r, header[0]);
               break;
          case VCMD_RESOURCE_CREATE:
-            ret = vtest_create_resource(r);
+            ret = vtest_create_resource(r, header[0]);
               break;
          case VCMD_RESOURCE_UNREF:
-            ret = vtest_resource_unref(r);
+            ret = vtest_resource_unref(r, header[0]);
               break;
          case VCMD_SUBMIT_CMD:
             ret = vtest_submit_cmd(r, header[0]);
@@ -2568,11 +2586,10 @@ int renderer_loop(void *d)
             ret = vtest_transfer_put(r, header[0]);
               break;
          case VCMD_RESOURCE_BUSY_WAIT:
-            vtest_renderer_create_fence(r);
-              ret = vtest_resource_busy_wait(r);
+            ret = vtest_resource_busy_wait(r, header[0]);
               break;
          case VCMD_GET_CAPS2:
-            ret = vtest_send_caps2(r);
+            ret = vtest_send_caps2(r, header[0]);
               break;
          case VCMD_DT_COMMAND:
             ret = vtest_dt_cmd(r);
@@ -2589,7 +2606,7 @@ int renderer_loop(void *d)
    if (ret <= 0) {
       goto fail;
    }
-    fail:
+fail:
    //fprintf(stderr, "socket failed - closing renderer\n");
    printf("socket failed - closing renderer\n");
 
@@ -2647,15 +2664,15 @@ JNIEXPORT void JNICALL Java_com_mittorn_virgloverlay_common_overlay_nativeRun(JN
 {
 static int ctx_id;
 ctx_id++;
-struct vtest_renderer *r = create_renderer(fd, ctx_id);
-r->jni.env = env;
-r->jni.cls = cls;
-r->jni.create = (*env)->GetStaticMethodID(env,cls, "create", "(IIII)Landroid/view/SurfaceView;");
-r->jni.get_surface = (*env)->GetStaticMethodID(env,cls, "get_surface", "(Landroid/view/SurfaceView;)Landroid/view/Surface;");
-r->jni.set_rect = (*env)->GetStaticMethodID(env,cls, "set_rect", "(Landroid/view/SurfaceView;IIIII)V");
-r->jni.destroy = (*env)->GetStaticMethodID(env,cls, "destroy", "(Landroid/view/SurfaceView;)V");
-r->flags = flags;
+r0 = create_renderer(fd, ctx_id);
+r0->jni.env = env;
+r0->jni.cls = cls;
+r0->jni.create = (*env)->GetStaticMethodID(env,cls, "create", "(IIII)Landroid/view/SurfaceView;");
+r0->jni.get_surface = (*env)->GetStaticMethodID(env,cls, "get_surface", "(Landroid/view/SurfaceView;)Landroid/view/Surface;");
+r0->jni.set_rect = (*env)->GetStaticMethodID(env,cls, "set_rect", "(Landroid/view/SurfaceView;IIIII)V");
+r0->jni.destroy = (*env)->GetStaticMethodID(env,cls, "destroy", "(Landroid/view/SurfaceView;)V");
+r0->flags = flags;
 
-renderer_loop(r);
+renderer_loop(r0);
 }
 #endif

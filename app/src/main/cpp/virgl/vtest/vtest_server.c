@@ -38,6 +38,7 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "util.h"
 #include "util/u_double_list.h"
@@ -50,6 +51,7 @@
 #include <sys/select.h>
 #endif
 
+#ifndef ANDROID_JNI
 enum vtest_client_error {
    VTEST_CLIENT_ERROR_INPUT_READ = 2, /* for backward compatibility */
    VTEST_CLIENT_ERROR_CONTEXT_MISSING,
@@ -739,4 +741,59 @@ static void vtest_server_close_socket(void)
       close(server.socket);
       server.socket = -1;
    }
+}
+#endif
+
+int vtest_open_socket(const char *path)
+{
+    int sock;
+
+    if(!path) path = "/tmp/.virgl_test";
+
+    struct sockaddr_un un;
+
+    sock = socket(PF_UNIX, SOCK_STREAM, 0);
+    if (sock < 0) {
+        return -1;
+    }
+
+    memset(&un, 0, sizeof(un));
+    un.sun_family = AF_UNIX;
+
+    snprintf(un.sun_path, sizeof(un.sun_path), "%s", path);
+
+    unlink(un.sun_path);
+
+    if (bind(sock, (struct sockaddr *)&un, sizeof(un)) < 0) {
+        goto err;
+    }
+    chmod(un.sun_path,0777);
+
+    if (listen(sock, 1) < 0){
+        goto err;
+    }
+
+    return sock;
+    err:
+    close(sock);
+    return -1;
+}
+
+int wait_for_socket_accept(int sock)
+{
+    fd_set read_fds;
+    int new_fd;
+    int ret;
+    FD_ZERO(&read_fds);
+    FD_SET(sock, &read_fds);
+
+    ret = select(sock + 1, &read_fds, NULL, NULL, NULL);
+    if (ret < 0)
+        return ret;
+
+    if (FD_ISSET(sock, &read_fds)) {
+        new_fd = accept(sock, NULL, NULL);
+        return new_fd;
+    }
+    return -1;
 }
