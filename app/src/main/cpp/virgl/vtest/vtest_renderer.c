@@ -2203,6 +2203,154 @@ void vtest_set_max_length(uint32_t length)
    renderer.max_length = length;
 }
 
+//TODO: RENDERER
+
+static int vtest_create_renderer(struct vtest_renderer *r, uint32_t length)
+{
+   char *vtestname;
+   int ret;
+   int ctx = 0;
+
+   if (getenv("VTEST_USE_EGL_SURFACELESS")) {
+      if (r->flags & FL_GLX) {
+         fprintf(stderr, "Cannot use surfaceless with GLX.\n");
+         return -1;
+      }
+      ctx |= VIRGL_RENDERER_USE_SURFACELESS;
+   }
+
+   if (r->flags & FL_GLES) {
+      if (r->flags & FL_GLX) {
+         fprintf(stderr, "Cannot use GLES with GLX.\n");
+         return -1;
+      }
+      ctx |= VIRGL_RENDERER_USE_GLES;
+   }
+
+   if( !(r->flags & FL_GLX) )
+      vtest_egl_init(r, false, (ctx & VIRGL_RENDERER_USE_GLES) != 0);
+
+   ret = virgl_renderer_init(r, ctx | VIRGL_RENDERER_THREAD_SYNC, &vtest_cbs);
+   if (ret) {
+      fprintf(stderr, "failed to initialise renderer.\n");
+      return -1;
+   }
+
+   vtestname = calloc(1, length + 1);
+   if (!vtestname)
+      return -1;
+
+   ret = vtest_block_read(r, vtestname, length);
+   if (ret != (int)length) {
+      ret = -1;
+      goto end;
+   }
+
+   ret = virgl_renderer_context_create(r->ctx_id, strlen(vtestname), vtestname);
+
+    end:
+   free(vtestname);
+   return ret;
+}
+
+static void vtest_destroy_renderer(struct vtest_renderer *r)
+{
+   int i;
+
+   for( i = 0; i < 32; i++)
+      vtest_dt_destroy(r, &r->dts[i]);
+
+   virgl_renderer_context_destroy(r->ctx_id);
+   virgl_renderer_cleanup(r);
+}
+
+void *create_renderer(int in_fd, int ctx_id)
+{
+   struct vtest_renderer *r = calloc(1, sizeof(struct vtest_renderer));
+
+   r->ctx_id = ctx_id;
+   r->fence_id = 1;
+   r->fd = in_fd;
+
+   return r;
+}
+
+int renderer_loop(void *d)
+{
+   int ret;
+   uint32_t header[VTEST_HDR_SIZE];
+   bool inited = false;
+   struct vtest_renderer *r = d;
+   EGLContext ctx = 0;
+   EGLSurface surf = 0;
+
+    again:
+   ret = vtest_wait_for_fd_read(r);
+   if (ret < 0)
+      goto fail;
+
+   ret = vtest_block_read(r, &header, sizeof(header));
+
+   if (ret == 8) {
+      if (!inited) {
+         if (header[1] != VCMD_CREATE_RENDERER)
+            goto fail;
+         ret = vtest_create_renderer(r, header[0]);
+         inited = true;
+      }
+      vtest_poll();
+      switch (header[1]) {
+         case VCMD_GET_CAPS:
+            ret = vtest_send_caps(r);
+              break;
+         case VCMD_RESOURCE_CREATE:
+            ret = vtest_create_resource(r);
+              break;
+         case VCMD_RESOURCE_UNREF:
+            ret = vtest_resource_unref(r);
+              break;
+         case VCMD_SUBMIT_CMD:
+            ret = vtest_submit_cmd(r, header[0]);
+              break;
+         case VCMD_TRANSFER_GET:
+            ret = vtest_transfer_get(r, header[0]);
+              break;
+         case VCMD_TRANSFER_PUT:
+            ret = vtest_transfer_put(r, header[0]);
+              break;
+         case VCMD_RESOURCE_BUSY_WAIT:
+            vtest_renderer_create_fence(r);
+              ret = vtest_resource_busy_wait(r);
+              break;
+         case VCMD_GET_CAPS2:
+            ret = vtest_send_caps2(r);
+              break;
+         case VCMD_DT_COMMAND:
+            ret = vtest_dt_cmd(r);
+              break;
+         default:
+            break;
+      }
+
+      if (ret < 0) {
+         goto fail;
+      }
+      goto again;
+   }
+   if (ret <= 0) {
+      goto fail;
+   }
+    fail:
+   //fprintf(stderr, "socket failed - closing renderer\n");
+   printf("socket failed - closing renderer\n");
+
+   vtest_destroy_renderer(r);
+   close(r->fd);
+   free(r);
+
+   return 0;
+}
+
 //TODO: JNI
 
 #ifdef ANDROID_JNI
