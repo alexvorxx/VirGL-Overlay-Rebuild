@@ -2205,6 +2205,145 @@ void vtest_set_max_length(uint32_t length)
    renderer.max_length = length;
 }
 
+//TODO: EGL
+
+static bool vtest_egl_init(struct vtest_renderer *d, bool surfaceless, bool gles)
+{
+   static EGLint conf_att[] = {
+           EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+           EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+           EGL_RED_SIZE, 1,
+           EGL_GREEN_SIZE, 1,
+           EGL_BLUE_SIZE, 1,
+           EGL_ALPHA_SIZE, 0,
+           EGL_NONE,
+   };
+   static const EGLint ctx_att[] = {
+           EGL_CONTEXT_CLIENT_VERSION, 2,
+           EGL_NONE
+   };
+   EGLBoolean b;
+   EGLenum api;
+   EGLint major, minor, n;
+   const char *extension_list;
+
+   if (gles)
+      conf_att[3] = EGL_OPENGL_ES_BIT;
+
+   if (surfaceless) {
+      conf_att[1] = EGL_PBUFFER_BIT;
+   }
+
+   const char *client_extensions = eglQueryString (NULL, EGL_EXTENSIONS);
+
+   d->egl_display =  eglGetDisplay(EGL_DEFAULT_DISPLAY);
+
+   if (!d->egl_display)
+      goto fail;
+
+   b = eglInitialize(d->egl_display, &major, &minor);
+   if (!b)
+      goto fail;
+
+   extension_list = eglQueryString(d->egl_display, EGL_EXTENSIONS);
+
+   printf("EGL major/minor: %d.%d\n", major, minor);
+   printf("EGL version: %s\n", eglQueryString(d->egl_display, EGL_VERSION));
+   printf("EGL vendor: %s\n", eglQueryString(d->egl_display, EGL_VENDOR));
+   printf("EGL extensions: %s\n", extension_list);
+
+   if (gles)
+      api = EGL_OPENGL_ES_API;
+   else
+      api = EGL_OPENGL_API;
+   b = eglBindAPI(api);
+   if (!b)
+      goto fail;
+
+   b = eglChooseConfig(d->egl_display, conf_att, &d->egl_conf,
+                       1, &n);
+
+   if (!b || n != 1)
+      goto fail;
+
+   d->egl_ctx = eglCreateContext(d->egl_display,
+                                 d->egl_conf,
+                                 EGL_NO_CONTEXT,
+                                 ctx_att);
+   if (!d->egl_ctx)
+      goto fail;
+
+   static EGLint const window_attribute_list[] = {
+           EGL_RENDER_BUFFER, EGL_BACK_BUFFER,
+           EGL_NONE,
+   };
+
+   struct vtest_renderer *r = d;
+   jobject surf = (*r->jni.env)->CallStaticObjectMethod(r->jni.env, r->jni.cls, r->jni.get_surface,(*r->jni.env)->CallStaticObjectMethod(r->jni.env, r->jni.cls, r->jni.create, 0, 0, 0, 0));
+   if(surf == 0)exit(0);
+   ANativeWindow *window = ANativeWindow_fromSurface(r->jni.env, surf);
+   int format;
+   eglGetConfigAttrib(d->egl_display, d->egl_conf, EGL_NATIVE_VISUAL_ID, &format);
+   ANativeWindow_setBuffersGeometry(window, 0, 0, format);
+   d->egl_fake_surf = eglCreateWindowSurface(d->egl_display, d->egl_conf, window, 0);
+
+   eglMakeCurrent(d->egl_display, d->egl_fake_surf, d->egl_fake_surf, d->egl_ctx);
+   return true;
+    fail:
+   return false;
+}
+
+static virgl_renderer_gl_context vtest_egl_create_context(void *cookie, int scanout_idx, struct virgl_renderer_gl_ctx_param *param)
+{
+   struct vtest_renderer *ve = cookie;
+   EGLContext eglctx;
+   EGLint ctx_att[] = {
+           EGL_CONTEXT_CLIENT_VERSION, param->major_ver,
+           EGL_CONTEXT_MINOR_VERSION_KHR, param->minor_ver,
+           EGL_NONE
+   };
+
+
+   eglctx = eglCreateContext(ve->egl_display,
+                             ve->egl_conf,
+                             param->shared ? eglGetCurrentContext() :
+                             ve->egl_ctx,
+                             ctx_att);
+
+   //printf("create_context %d %d %d %d %x\n", scanout_idx, param->shared, param->major_ver, param->minor_ver, eglctx);
+
+   return (virgl_renderer_gl_context)eglctx;
+}
+
+static void vtest_egl_destroy_context(void *cookie, virgl_renderer_gl_context ctx)
+{
+   struct vtest_renderer *ve = cookie;
+   EGLContext eglctx = (EGLContext)ctx;
+
+   //printf("destroy_context %x\n", ctx);
+
+   eglDestroyContext(ve->egl_display, eglctx);
+}
+
+static int vtest_egl_make_context_current(void *cookie, int scanout_idx, virgl_renderer_gl_context ctx)
+{
+   struct vtest_renderer *ve = cookie;
+   EGLContext eglctx = (EGLContext)ctx;
+   if( ctx == ve->egl_ctx )
+      return eglMakeCurrent(ve->egl_display, ve->egl_fake_surf ,ve->egl_fake_surf, eglctx);
+   else
+      return eglMakeCurrent(ve->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, eglctx);
+
+}
+
+struct virgl_renderer_callbacks vtest_cbs = {
+        .version = 1,
+        .write_fence = vtest_write_fence,
+        .create_gl_context = vtest_egl_create_context,
+        .destroy_gl_context = vtest_egl_destroy_context,
+        .make_current = vtest_egl_make_context_current,
+};
+
 //TODO: DT
 
 static void vtest_dt_destroy(struct vtest_renderer *r, struct dt_record *dt)
