@@ -43,6 +43,7 @@
 
 #include <epoxy/egl.h>
 #include <pthread.h>
+#include <vrend_renderer.h>
 
 #ifdef HAVE_EVENTFD_H
 #include <sys/eventfd.h>
@@ -67,6 +68,7 @@
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <android/log.h>
+
 #define printf(...) __android_log_print(ANDROID_LOG_DEBUG, "virgl", __VA_ARGS__)
 #define perror(...) __android_log_print(ANDROID_LOG_DEBUG, "virgl", __VA_ARGS__)
 #endif
@@ -2201,6 +2203,114 @@ int vtest_submit_cmd2(uint32_t length_dw)
 void vtest_set_max_length(uint32_t length)
 {
    renderer.max_length = length;
+}
+
+//TODO: DT
+
+static void vtest_dt_destroy(struct vtest_renderer *r, struct dt_record *dt)
+{
+#ifdef ANDROID_JNI
+   if( dt->java_surf )
+      (*r->jni.env)->CallStaticVoidMethod(r->jni.env, r->jni.cls, r->jni.destroy, dt->java_surf);
+   dt->java_surf = 0;
+#endif
+
+   if( dt->egl_surf )
+   {
+      eglMakeCurrent( r->egl_display, r->egl_fake_surf, r->egl_fake_surf, r->egl_ctx);
+      eglDestroySurface(r->egl_display, dt->egl_surf);
+      dt->egl_surf = 0;
+   }
+}
+
+static void vtest_dt_flush(struct vtest_renderer *r, struct dt_record *dt, int handle, int x, int y, int w, int h)
+{
+   eglMakeCurrent(r->egl_display, dt->egl_surf, dt->egl_surf, r->egl_ctx);
+
+   if(!dt->fb_id)
+      glGenFramebuffersEXT(1,&dt->fb_id);
+
+   glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, dt->fb_id );
+
+   // use internal API here to get texture id
+   if( handle != dt->res_id)
+   {
+      struct vrend_resource *res;
+
+      res = vrend_renderer_ctx_res_lookup(overlay_ctx, handle);
+
+      glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, res->id, 0);
+
+      dt->res_id = handle;
+   }
+
+   glReadBuffer(GL_COLOR_ATTACHMENT0_EXT);
+
+   glBindFramebufferEXT(GL_DRAW_FRAMEBUFFER_EXT, 0);
+   glBlitFramebuffer(x,y+h,w+x,y,x,y,w+x,h+y,GL_COLOR_BUFFER_BIT,GL_NEAREST);
+
+   eglSwapBuffers(r->egl_display, dt->egl_surf);
+}
+
+static void vtest_dt_set_rect(struct vtest_renderer *r, struct dt_record *dt, int visible, int x, int y, int w, int h)
+{
+#ifdef ANDROID_JNI
+   (*r->jni.env)->CallStaticVoidMethod(r->jni.env, r->jni.cls, r->jni.set_rect, dt->java_surf,x,y,w,h,visible);
+#endif
+}
+
+static void vtest_dt_create(struct vtest_renderer *r, struct dt_record *dt, int drawable, int x, int y, int w, int h)
+{
+#ifdef ANDROID_JNI
+   if(!dt->egl_surf)
+   {
+      dt->java_surf = (*r->jni.env)->CallStaticObjectMethod(r->jni.env, r->jni.cls, r->jni.create, x, y, w, h);
+      jobject surf = (*r->jni.env)->CallStaticObjectMethod(r->jni.env, r->jni.cls, r->jni.get_surface, dt->java_surf);
+      ANativeWindow *window = ANativeWindow_fromSurface(r->jni.env, surf);
+      int format;
+      eglGetConfigAttrib(r->egl_display, r->egl_conf, EGL_NATIVE_VISUAL_ID, &format);
+      ANativeWindow_setBuffersGeometry(window, 0, 0, format);
+      dt->egl_surf = eglCreateWindowSurface(r->egl_display, r->egl_conf, window, 0);
+      //r->egl_drawable_surf = r->egl_fake_surf;
+   }
+#endif
+}
+
+static int vtest_dt_cmd(struct vtest_renderer *r)
+{
+   uint32_t flush_buf[VCMD_DT_SIZE];
+   int ret;
+   uint32_t cmd, x, y, w, h, handle;
+   uint32_t drawable, id;
+
+   ret = vtest_block_read(r, &flush_buf, sizeof(flush_buf));
+   if (ret != sizeof(flush_buf))
+      return -1;
+
+   //EGLContext ctx = eglGetCurrentContext();
+
+   drawable = flush_buf[VCMD_DT_DRAWABLE];
+   x = flush_buf[VCMD_DT_X];
+   y = flush_buf[VCMD_DT_Y];
+   w = flush_buf[VCMD_DT_WIDTH];
+   h = flush_buf[VCMD_DT_HEIGHT];
+   id = flush_buf[VCMD_DT_ID];
+   cmd = flush_buf[VCMD_DT_CMD];
+   handle = flush_buf[VCMD_DT_HANDLE];
+
+   //printf("dt_cmd %d %d %d %d %d %d %d %d\n", cmd, x, y, w, h, id, handle, drawable);
+
+   struct dt_record *dt = &r->dts[id];
+
+   if( cmd == VCMD_DT_CMD_CREATE )
+      vtest_dt_create(r, dt, drawable, x, y, w, h);
+   else if(cmd == VCMD_DT_CMD_DESTROY)
+      vtest_dt_destroy(r, dt);
+   else if(cmd == VCMD_DT_CMD_SET_RECT)
+      vtest_dt_set_rect(r, dt, drawable, x, y, w, h);
+   if( cmd == VCMD_DT_CMD_FLUSH )
+      vtest_dt_flush(r, dt, handle, x, y, w, h);
+   return 0;
 }
 
 //TODO: RENDERER
