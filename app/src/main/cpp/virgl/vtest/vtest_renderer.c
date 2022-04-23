@@ -40,6 +40,10 @@
 #include <sys/uio.h>
 #include <sys/socket.h>
 #include <sys/mman.h>
+
+#include <epoxy/egl.h>
+#include <pthread.h>
+
 #ifdef HAVE_EVENTFD_H
 #include <sys/eventfd.h>
 #endif
@@ -57,6 +61,41 @@
 #include "util/u_hash_table.h"
 
 #define VTEST_MAX_SYNC_QUEUE_COUNT 64
+
+#ifdef  ANDROID_JNI
+#include <jni.h>
+#include <android/native_window.h>
+#include <android/native_window_jni.h>
+#include <android/log.h>
+#define printf(...) __android_log_print(ANDROID_LOG_DEBUG, "virgl", __VA_ARGS__)
+#define perror(...) __android_log_print(ANDROID_LOG_DEBUG, "virgl", __VA_ARGS__)
+#endif
+
+#define FL_GLX (1<<1)
+#define FL_GLES (1<<2)
+#define FL_OVERLAY (1<<3)
+#define FL_MULTITHREAD (1<<4)
+
+extern struct vrend_context *overlay_ctx;
+
+int dxtn_decompress; //DXTn (S3TC) decompress
+
+static char sock_path[128];
+static int flags;
+
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+EGLDisplay disp;
+
+struct dt_record
+{
+    uint32_t used;
+    EGLSurface egl_surf;
+    int fb_id;
+    int res_id;
+#ifdef ANDROID_JNI
+    jobject java_surf;
+#endif
+};
 
 struct vtest_resource {
    struct list_head head;
@@ -128,11 +167,37 @@ struct vtest_context {
 };
 
 struct vtest_renderer {
+   // pipe
+   int fd;
+   int flags;
+
+   // egl
+   EGLDisplay egl_display;
+   EGLConfig egl_conf;
+   EGLContext egl_ctx;
+   EGLSurface egl_fake_surf;
+
+   // renderer
+   int ctx_id;
+
    const char *rendernode_name;
    bool multi_clients;
    uint32_t ctx_flags;
 
    uint32_t max_length;
+
+   struct dt_record dts[32];
+#ifdef ANDROID_JNI
+   struct jni_s
+   {
+       jclass cls;
+       JNIEnv *env;
+       jmethodID create;
+       jmethodID get_surface;
+       jmethodID set_rect;
+       jmethodID destroy;
+   } jni;
+#endif
 
    int implicit_fence_submitted;
    int implicit_fence_completed;
@@ -2137,3 +2202,63 @@ void vtest_set_max_length(uint32_t length)
 {
    renderer.max_length = length;
 }
+
+//TODO: JNI
+
+#ifdef ANDROID_JNI
+JNIEXPORT jint JNICALL Java_com_mittorn_virgloverlay_common_overlay_nativeOpen(JNIEnv *env, jclass cls)
+{
+   disp = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+   return vtest_open_socket(sock_path);
+}
+
+JNIEXPORT void JNICALL Java_com_mittorn_virgloverlay_common_overlay_nativeUnlink(JNIEnv *env, jclass cls)
+{
+unlink(sock_path);
+}
+JNIEXPORT jint JNICALL Java_com_mittorn_virgloverlay_common_overlay_nativeAccept(JNIEnv *env, jclass cls, jint fd)
+{
+   return wait_for_socket_accept(fd);
+}
+
+JNIEXPORT void JNICALL Java_com_mittorn_virgloverlay_common_overlay_nativeSettings(JNIEnv *env, jclass cls, jstring settings)
+{
+char *utf = (*env)->GetStringUTFChars(env, settings, 0);
+int var1, var2, var3;
+if (utf) {
+FILE *f = fopen(utf, "r");
+if(!f)exit(1);
+fscanf(f, "%d %d %d %d", &var1, &var2, &var3, &dxtn_decompress);
+(*env)->ReleaseStringUTFChars(env, settings, utf);
+}
+}
+
+JNIEXPORT jint JNICALL Java_com_mittorn_virgloverlay_common_overlay_nativeInit(JNIEnv *env, jclass cls, jstring settings)
+{
+   char *utf = (*env)->GetStringUTFChars(env, settings, 0);
+   if (utf) {
+      FILE *f = fopen(utf, "r");
+      if(!f)exit(1);
+      fscanf(f, "%d %[^ ]", &flags, sock_path);
+      printf("'%d', '%s'", flags, sock_path);
+      (*env)->ReleaseStringUTFChars(env, settings, utf);
+   }
+   return flags & FL_MULTITHREAD;
+}
+
+JNIEXPORT void JNICALL Java_com_mittorn_virgloverlay_common_overlay_nativeRun(JNIEnv *env, jclass cls, jint fd)
+{
+static int ctx_id;
+ctx_id++;
+struct vtest_renderer *r = create_renderer(fd, ctx_id);
+r->jni.env = env;
+r->jni.cls = cls;
+r->jni.create = (*env)->GetStaticMethodID(env,cls, "create", "(IIII)Landroid/view/SurfaceView;");
+r->jni.get_surface = (*env)->GetStaticMethodID(env,cls, "get_surface", "(Landroid/view/SurfaceView;)Landroid/view/Surface;");
+r->jni.set_rect = (*env)->GetStaticMethodID(env,cls, "set_rect", "(Landroid/view/SurfaceView;IIIII)V");
+r->jni.destroy = (*env)->GetStaticMethodID(env,cls, "destroy", "(Landroid/view/SurfaceView;)V");
+r->flags = flags;
+
+renderer_loop(r);
+}
+#endif
